@@ -1,0 +1,149 @@
+/*
+ * no_server_chat_tool.pseudocode
+ * Created on: 2018/12/22
+ * Copyright: (c) 张思源 (zvzVMWWWin10@hotmail.com)
+ * This file is licensed under the GNU Lesser General 
+ *     Public License v3.0 (GPL-3.0).
+ */
+
+using ui, file, sql, encrypt, internet;
+enum internet_events;
+
+namespace gui:
+    UI login, create_user, chat_window, friend_invitation;
+    func enter_account(account_data) -> chat_window;
+
+namespace file_io:
+    func read_account_data(const string &id, const string &password)\
+        -> account_data | PASSWORD_ERROR | FILE_IO_ERROR;
+
+    func new_account_data(const string &id, const string &password)\
+        -> account_data | FILE_IO_ERROR;
+
+    table account_table;
+
+namespace decentralized_chat_tool:
+    struct Account {
+        string name, id, data_dir;
+    }
+
+    struct Account_Data {
+        string name, id, data_dir;
+        string[] friends; // Stores id of friends.
+        string[] groups; // Stores id of groups.
+    }
+    enum Login_Type login_type;
+
+    # Account operations
+
+    func get_account(info);
+
+    func create_account(const string &name, 
+        const string &password):
+        stored_id = name + (string)device.mac_address +
+            (string)datetime.date();
+        stored_dir = (string)(hex)(hash)stored_id;
+        stored_friends = [];
+        stored_groups = [];
+        account = get_account(Array5(name, stored_id, 
+            stored_dir, stored_friends, stored_groups));
+        
+        account_data = file_io::new_account_data(
+            stored_id, password);
+        
+        sql_opr(file_io::account_table as table):
+            INSERT (account..., account_data) INTO table;
+        file_io::account_table.save();
+        # login_local_account(stored_id, stored_password);
+        return account;
+
+    func login_local_account(const string &name, 
+        const string &password):
+        possible_accounts = sql_opr(file_io::account_table as table):
+            SELECT * FROM table WHERE id LIKE "${name}%";
+        if possible_accounts.isEmpty():
+            throw FILE_IO_ERROR;
+        foreach account in possible_accounts:
+            try:
+                account_data = file_io::read_account_data(account.id, 
+                    password);
+                login_type = LOGIN_TYPE_LOCAL;
+                return gui::enter_account(account_data);
+            catch PASSWORD_ERROR:
+                continue;
+        throw PASSWORD_ERROR;
+
+    func login_as_second_device(const string &name, 
+        const string &password):
+        attempts = 0;
+        while attemps < MAX_LOGIN_ATTEMPS:
+            attempts += 1;
+            private_key = encrypt::random_key();
+            public_key = encrypt::get_public(private_key);
+            internet::broadcast(SECOND_DEVICE_LOGIN_REQUEST, 
+                (hash)name, (hash)password, public_key);
+            try:
+                internet::listen(SECOND_DEVICE_LOGIN_RESPONSE, &info, 
+                    max_wait_seconds = 60):
+                    if (hash)info.name == name:
+                        try:
+                            account_info = encrypt.decrypt(private_key, 
+                                info.account_info)
+                            login_type = LOGIN_TYPE_SECOND_DEVICE;
+                            changes_pool = pool;
+                            gui::enter_account(account_info);
+                            return;
+                        catch DECRYPTION_ERROR:;
+                    else:
+                        hang_on();
+            catch TIMEOUT_ERROR: break;
+        throw TIMEOUT_ERROR;
+    
+    func exit_account():
+        switch login_type:
+            case LOGIN_TYPE_LOCAL:
+                account_data.save();
+                exit(0);
+            case3 LOGIN_TYPE_SECOND_DEVICE:
+                release_exit_signal();
+                changes_pool.upload();
+                remove_local_cache();
+                exit(0);
+
+    # Friend add
+
+    func add_friend_structure(const Account &friend_account):
+        account_data.friends.push_back(friend_account);
+
+    func make_friend_invitation_code():
+        key = encrypt::random_key();
+        code = (hex)encrypt::get_public(key);
+        listen(FRIEND_INVITATION_CODE_REQUEST, &info,
+            wait_until_true = &gui::friend_invitation.user_terminated):
+            if info.code == code:
+                received_data = encrypt::decrypt(key, info.data);
+                send(FRIEND_INVITATION_PASSED, received_data.ip, account);
+                gui::friend_invitation.display_account_connection;
+                if await listen(FRIEND_INVITATION_PASSED_OK, source = 
+                    received_data.ip)
+                    add_friend_structure(received_data.account);
+            hang_on();
+        return code;
+    
+    func input_friend_invitation_code():
+        code = (hex2byte)gui::friend_invitation.get_code();
+        data = encrypt.encrypt({account: account, ip: device.ip_address;})
+        send(FRIEND_INVITATION_CODE_REQUEST, {code: code, data: data});
+        result = listen(FRIEND_INVITATION_PASSED, &info, 
+            wait_until_true = (info and info.code == code) or 
+                &gui::friend_invitation.user_terminated);
+        if (result):
+            # Friend invitation passed
+            gui::friend_invitation.user_terminated = false;
+            gui::friend_invitation.show_friend_invitation_passed();
+            if (gui::friend_invitation.user_submit()):
+                send(FRIEND_INVITATION_PASSED_OK, null);
+                add_friend_structure(info.account);
+        else:
+            # Friend invitation failed
+            gui::friend_invitation.show_friend_invitation_failed();
