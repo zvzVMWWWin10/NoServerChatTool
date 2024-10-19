@@ -28,8 +28,8 @@ At present, the project is in its early stages. I am still working on the overal
 structure, and there is no functional code yet. This repository may remain in its
 initial phase for some time as I continue to develop the concept.   
 
-I'm new writing code, and I have little experience about writing a big project. If 
-anyone can see this thing, I hope he can provide some suggestions.   
+I'm a beginner in programming, and I have little experience about writing a big 
+project. If anyone can see this thing, I hope he can provide some suggestions.   
 
 Zhang Siyuan (zvzVMWWWin10@hotmail.com)   
 10/19/2024   
