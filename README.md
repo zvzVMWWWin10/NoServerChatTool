@@ -31,7 +31,7 @@ initial phase for some time as I continue to develop the concept.
 I'm new writing code, and I have little experience about writing a big project. If 
 anyone can see this thing, I hope he can provide some suggestions.   
 
-Victor (zvzVMWWWin10@hotmail.com)   
+Zhang Siyuan (zvzVMWWWin10@hotmail.com)   
 10/19/2024   
 
 #NoServerChatTool
