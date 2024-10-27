@@ -6,11 +6,11 @@
  *     Public License v3.0 (GPL-3.0).
  */
 
-using ui, file, sql, encrypt, internet;
+using ui, file, sql, encrypt, internet, datetime;
 enum internet_events;
 
 namespace gui:
-    UI login, create_user, chat_window, friend_invitation;
+    class login, create_user, chat_window, friend_invitation : UI;
     func enter_account(account_data) -> chat_window;
 
 namespace file_io:
@@ -22,15 +22,25 @@ namespace file_io:
 
     table account_table;
 
-namespace decentralized_chat_tool:
+namespace decentralized_chat_tool_core:
+    personal_static_key_sum = 256;
+
     struct Account {
         string name, id, data_dir;
+        encrypt::public_key encryption_keys;
+    }
+
+    struct Account_Data_In_File {
+        string name, id, data_dir;
+        Account[] friends; # Stores id of friends.
+        string[] groups; # Stores id of groups.
+        map<encrypt::public_key, encrypt::private_key> encryption_keys;
     }
 
     struct Account_Data {
-        string name, id, data_dir;
-        string[] friends; // Stores id of friends.
-        string[] groups; // Stores id of groups.
+        Account_Data_In_File info;
+        map<string /*id of friends*/, string /*IP address | null*/>
+            friends_online;
     }
     enum Login_Type login_type;
 
@@ -43,10 +53,25 @@ namespace decentralized_chat_tool:
         stored_id = name + (string)device.mac_address +
             (string)datetime.date();
         stored_dir = (string)(hex)(hash)stored_id;
+
         stored_friends = [];
         stored_groups = [];
-        account = get_account(Array5(name, stored_id, 
-            stored_dir, stored_friends, stored_groups));
+        # The private and public keys are stored in reverse
+        #  in a hash list to facilitate the generation of lookups
+        stored_keys = {};
+
+        for key_count from 0 to personal_static_key_sum:
+            key_get = null;
+            while key_get == null or key_get in stored_keys.keys():
+                key_get = encrypt::random_key();
+            stored_keys.push_back(key_get, encrypt::public_key(key_get));
+        # Invert the sequence
+        stored_keys_is = {};
+        for private_key in stored_keys:
+            stored_keys_is.push_back(stored_keys[private_key], private_key);
+        stored_keys_is.sort();
+        account = get_account(Array(name, stored_id, stored_dir, 
+            stored_friends, stored_groups, stored_keys_is));
         
         account_data = file_io::new_account_data(
             stored_id, password);
@@ -68,10 +93,20 @@ namespace decentralized_chat_tool:
                 account_data = file_io::read_account_data(account.id, 
                     password);
                 login_type = LOGIN_TYPE_LOCAL;
+                check_friends_online();
                 return gui::enter_account(account_data);
             catch PASSWORD_ERROR:
                 continue;
         throw PASSWORD_ERROR;
+    
+    func check_friends_online():
+        foreach friend in account.friend_account:
+            internet::broadcast((hash)friend.id, CHECK_FRIENDS_ONLINE);
+            account_data.friends_online[friend_account[pos].id] = info.ip;
+        internet::listen(RESPONSE_FOR_ONLINE, &info, max_wait_seconds = 60):
+            if info.id_hash in (hash_list)friend_account, pos as position:
+                account_data.friends_online[friend_account[pos].id] = info.ip;
+        return;
 
     func login_as_second_device(const string &name, 
         const string &password):
@@ -103,6 +138,7 @@ namespace decentralized_chat_tool:
         switch login_type:
             case LOGIN_TYPE_LOCAL:
                 account_data.save();
+                release_exit_signal();
                 exit(0);
             case3 LOGIN_TYPE_SECOND_DEVICE:
                 release_exit_signal();
@@ -118,14 +154,16 @@ namespace decentralized_chat_tool:
     func make_friend_invitation_code():
         key = encrypt::random_key();
         code = (hex)encrypt::get_public(key);
-        listen(FRIEND_INVITATION_CODE_REQUEST, &info,
+        gui::friend_invitation.set_code(code);
+        internet::listen(FRIEND_INVITATION_CODE_REQUEST, &info,
             wait_until_true = &gui::friend_invitation.user_terminated):
             if info.code == code:
                 received_data = encrypt::decrypt(key, info.data);
-                send(FRIEND_INVITATION_PASSED, received_data.ip, account);
+                internet::send(FRIEND_INVITATION_PASSED, ip = received_data.ip, 
+                    account);
                 gui::friend_invitation.display_account_connection;
-                if await listen(FRIEND_INVITATION_PASSED_OK, source = 
-                    received_data.ip)
+                if await internet::listen(FRIEND_INVITATION_PASSED_OK, 
+                    source = received_data.ip)
                     add_friend_structure(received_data.account);
             hang_on();
         return code;
@@ -133,8 +171,8 @@ namespace decentralized_chat_tool:
     func input_friend_invitation_code():
         code = (hex2byte)gui::friend_invitation.get_code();
         data = encrypt.encrypt({account: account, ip: device.ip_address;})
-        send(FRIEND_INVITATION_CODE_REQUEST, {code: code, data: data});
-        result = listen(FRIEND_INVITATION_PASSED, &info, 
+        internet::broadcast(FRIEND_INVITATION_CODE_REQUEST, {code: code, data: data});
+        result = internet::listen(FRIEND_INVITATION_PASSED, &info, 
             wait_until_true = (info and info.code == code) or 
                 &gui::friend_invitation.user_terminated);
         if (result):
@@ -142,8 +180,67 @@ namespace decentralized_chat_tool:
             gui::friend_invitation.user_terminated = false;
             gui::friend_invitation.show_friend_invitation_passed();
             if (gui::friend_invitation.user_submit()):
-                send(FRIEND_INVITATION_PASSED_OK, null);
+                internet::send(FRIEND_INVITATION_PASSED_OK, ip = info[0], null);
                 add_friend_structure(info.account);
         else:
             # Friend invitation failed
             gui::friend_invitation.show_friend_invitation_failed();
+
+    # Data transmission
+
+    func send_data_to_friend(const string &friend_id, const bytes[][] &data):
+        if not account_data.friends_online.has_key(friend_id):
+            throw INPUT_ERROR;
+        
+        data_serial = (hash)(account_data.info.id + datetime.time);
+        # If the friend is online, send the data directly
+        friend_ip = account_data[friend_id]
+        if friend_ip != null:
+            async delegrate send_data(data, count)[=]:
+                # Receive key
+                internet::send(GET_TRANSMISSION_KEY, ip = friend_ip,
+                    (hash)account_data.info.id);
+                transmission_key = null;
+                recognizer = null; # A piece of data to recognize the encryption
+                                   #  key used.
+                internet::listen(SEND_TRANSMISSION_KEY, &info, source = friend_ip,
+                    max_wait_seconds = 60):
+                    # Verify data complete
+                    success = true;
+                    if not (hash)info.data == info.data.hash:
+                        success = false;
+                    
+                    # Decrypt the key
+                    index = info.data.decrypt_index;
+                    if index >= 0 and index < personal_static_key_sum:
+                        success = false;
+                    private_key = account_data.info.encryption_keys.value(index);
+                    try:
+                        transmission_key = encrypt::decrypt(private_key, 
+                            info.data.key_e);
+                    catch DECRYPTION_ERROR:
+                        success = false;
+
+                    # Display error to the sender
+                    if not success:
+                        internet::send(TRANSMISSON_FAILURE, ip = friend_ip, null);
+                
+                # Send data
+                encrypted_data = encrypt::encrypt(transmission_key, data);
+                internet::send(MSG_SEND, ip = friend_ip, {count: count, 
+                    serial: serial, data: encrypted_data, hash: (hash)encrypted_data});
+                internet::listen(MSG_RECEIVED, &info, source = friend_ip, 
+                    max_wait_seconds = 60):
+                    if info.state == Error:
+                        internet::send(MSG_SEND, ip = friend_ip, {count: count, 
+                            serial: serial, data: encrypted_data, 
+                            hash: (hash)encrypted_data});
+                        hang_on();
+                    # else if info.state == Success:
+                    #   pass;
+            promises = []
+            foreach data_slice in data, count as count:
+                promises.push_back(send_data(data_slice, count));
+            await promises.join();
+        else:
+            pass # Not developed yet
