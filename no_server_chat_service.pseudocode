@@ -1,0 +1,19 @@
+/*
+ * no_server_chat_services.pseudocode
+ * Created on: 2024/11/21
+ * Copyright: (c) R6AX-ZOE (zvzVMWWWin10@hotmail.com)
+ * This file is licensed under the GNU Lesser General 
+ *     Public License v3.0 (GPL-3.0).
+ * Pseudocode for background activities
+ */
+
+using ui, file, sql, encrypt, datetime, plugins;
+
+extern ...
+
+namespace services:
+    class Abstract_Subservice:
+        abstract void start();
+        abstract void stop();
+        abstract void on_message(string message);
+    class Storage_Subservice:

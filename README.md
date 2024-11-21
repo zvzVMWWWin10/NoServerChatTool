@@ -31,7 +31,7 @@ initial phase for some time as I continue to develop the concept.
 I'm a beginner in programming, and I have little experience about writing a big 
 project. If anyone can see this thing, I hope he can provide some suggestions.   
 
-Zhang Siyuan (zvzVMWWWin10@hotmail.com)   
+R6AX-ZOE (zvzVMWWWin10@hotmail.com)   
 10/19/2024   
 
 # NoServerChatTool
@@ -60,5 +60,5 @@ NoServerChatTool 是一个不依赖于任何服务器的聊天软件，这能够
 我是一个写软件的新手，没有写大型项目的经验。如果有人看到了这个仓库，我恳请他能够为我提供宝贵
 的建议。   
 
-张思源 (zvzVMWWWin10@hotmail.com)    
+R6AX-ZOE (zvzVMWWWin10@hotmail.com)    
 2024年10月19日
